@@ -1,0 +1,348 @@
+version: "3.3"
+
+services:
+  traefik:
+    image: traefik
+    restart: always
+    container_name: traefik
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      - --api.dashboard=true
+      - --api.debug=true
+      - --log.level=DEBUG
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.file.filename=/dynamic.yaml
+      - --providers.docker.network=web
+      - --entrypoints.web.address=:80
+      - --entrypoints.web-secured.address=:443
+      - --certificatesresolvers.mytlschallenge.acme.tlschallenge=true
+      - --certificatesresolvers.mytlschallenge.acme.email=${LETS_ENCRYPT_EMAIL}
+      - --certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json
+    volumes:
+      - ./letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./dynamic.yaml:/dynamic.yaml
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.routers.api-secure.service=api@internal"
+      - "traefik.http.routers.api.middlewares=redirect@file"
+      - "traefik.http.routers.api-secure.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.api-secure.entrypoints=web-secured"
+      - "traefik.http.routers.api-secure.tls.certresolver=mytlschallenge"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_USER_AUTH}"
+      - "traefik.http.routers.api-secure.middlewares=auth"
+      
+  bfweb: 
+    image: bfnginx
+    restart: always
+    container_name: bfweb
+    volumes:
+      - /root/bfe:/usr/share/nginx/html:ro
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bfnginx-web.rule=Host(`bf.${DOMAIN}`)"
+      - "traefik.http.routers.bfnginx-web.entrypoints=web"
+      - "traefik.http.routers.bfnginx-web.middlewares=redirect@file"
+      - "traefik.http.routers.bfnginx-secured.rule=Host(`bf.${DOMAIN}`)"
+      - "traefik.http.routers.bfnginx-secured.entrypoints=web-secured"
+      - "traefik.http.routers.bfnginx-secured.tls.certresolver=mytlschallenge"
+  
+  portainer:
+    image: portainer/portainer-ce
+    restart: always
+    container_name: portainer
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks: 
+      - web
+    labels: 
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(`portainer.${DOMAIN}`)"
+      - "traefik.http.routers.portainer.entrypoints=web-secured"
+      - "traefik.http.routers.portainer.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    restart: unless-stopped
+    volumes:
+        - /opt/containers/bitwarden/data:/data
+    networks: 
+      - web
+    environment: 
+      SIGNUPS_ALLOWED: "FALSE"
+      INVITATIONS_ALLOWED: "FALSE"
+      WEBSOCKET_ENABLED: "TRUE"
+    ports:
+      - 3012:3012
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vaultwarden.entrypoints=web"
+      - "traefik.http.routers.vaultwarden.rule=Host(`vaultwarden.${DOMAIN}`)"
+      - "traefik.http.routers.vaultwarden.middlewares=redirect@file"
+      - "traefik.http.services.vaultwarden.loadbalancer.server.port=80"
+      - "traefik.http.routers.vaultwarden-secure.entrypoints=web-secured"
+      - "traefik.http.routers.vaultwarden-secure.rule=Host(`vaultwarden.${DOMAIN}`)"
+      - "traefik.http.routers.vaultwarden-secure.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.vaultwarden-secure.service=vaultwarden"
+
+  heimdall:
+    image: linuxserver/heimdall:latest
+    container_name: heimdall
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/data/heimdall:/config
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.heimdall.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.heimdall.entrypoints=web"
+      - "traefik.http.services.heimdall.loadbalancer.server.port=80"
+      - "traefik.http.routers.heimdall.middlewares=redirect@file"
+      - "traefik.http.routers.heimdall-secure.entrypoints=web-secured"
+      - "traefik.http.routers.heimdall-secure.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.heimdall-secure.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.heimdall-secure.service=heimdall"
+
+  mememanager:
+    image: mememanager:0.1
+    container_name: mememanager
+    networks:
+      - web
+    ports:
+      - "1211:443"
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.mememanager.rule=Host(`memes.${DOMAIN}`)"
+      - "traefik.http.routers.mememanager.entrypoints=web"
+      - "traefik.http.services.mememanager.loadbalancer.server.port=8080"
+      - "traefik.http.routers.mememanager.middlewares=redirect@file"
+      - "traefik.http.routers.mememanager-secure.entrypoints=web-secured"
+      - "traefik.http.routers.mememanager-secure.rule=Host(`memes.${DOMAIN}`)"
+      - "traefik.http.routers.mememanager-secure.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.mememanager-secure.service=mememanager"
+
+  gitea:
+    image: gitea/gitea:latest 
+    container_name: gitea
+    environment:
+      - GITEA__database__DB_TYPE=postgres
+      - GITEA__database__HOST=postgres-db:5432
+      - GITEA__database__NAME=gitea
+      - GITEA__database__USER=${POSTGRES_USER}
+      - GITEA__database__PASSWD=${POSTGRES_PASSWORD}
+    restart: unless-stopped
+    networks:
+      - web
+    volumes:
+      - /opt/containers/gitea/data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "222:222"
+    depends_on:
+      - postgres-db      
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gitea.entrypoints=web"
+      - "traefik.http.routers.gitea.rule=Host(`git.${DOMAIN}`)"
+      - "traefik.http.routers.gitea.middlewares=redirect@file"
+      - "traefik.http.routers.gitea-secure.entrypoints=web-secured"
+      - "traefik.http.routers.gitea-secure.rule=Host(`git.${DOMAIN}`)"
+      - "traefik.http.routers.gitea-secure.tls=true"
+      - "traefik.http.routers.gitea-secure.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.gitea-secure.service=gitea-secure"
+      - "traefik.http.services.gitea-secure.loadbalancer.server.port=3000"
+
+
+  postgres-db:
+    container_name: postgresql
+    image: postgres
+    restart: always
+    networks:
+      - web
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: gitea
+    volumes:
+      - "/opt/containers/postgres/data:/var/lib/postgresql/data"
+    ports:
+      - "5432:5432"
+
+  pgadmin:
+    container_name: pgadmin4_container
+    image: dpage/pgadmin4
+    restart: always
+    networks:
+      - web
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${POSTGRES_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${POSTGRES_PASSWORD}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin.entrypoints=web"
+      - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.${DOMAIN}`)"
+      - "traefik.http.routers.pgadmin.middlewares=redirect@file"
+      - "traefik.http.routers.pgadmin-secure.entrypoints=web-secured"
+      - "traefik.http.routers.pgadmin-secure.rule=Host(`pgadmin.${DOMAIN}`)"
+      - "traefik.http.routers.pgadmin-secure.tls=true"
+      - "traefik.http.routers.pgadmin-secure.tls.certresolver=mytlschallenge"
+  
+  ghost:
+    image: ghost:4-alpine
+    restart: always
+    container_name: ghost
+    environment:
+      database__client: mysql
+      database__connection__host: ghost-db
+      database__connection__user: root
+      database__connection__password: ${GHOST_PASSWORD}
+      database__connection__database: ghost
+      url: https://blog.${DOMAIN}
+    volumes:
+        - "/root/ghost/ghostdata:/var/lib/ghost/content"
+    networks:
+        - web
+        - ghost
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ghost.rule=Host(`blog.${DOMAIN}`)"
+      - "traefik.http.routers.ghost.entrypoints=web"
+      - "traefik.http.routers.ghost.middlewares=redirect@file"
+      - "traefik.http.routers.ghost-secured.rule=Host(`blog.${DOMAIN}`)" 
+      - "traefik.http.routers.ghost-secured.entrypoints=web-secured"
+      - "traefik.http.routers.ghost-secured.tls.certresolver=mytlschallenge"
+    
+  ghost-db:
+    container_name: ghost-db
+    image: mysql:5.7
+    restart: always
+    networks:
+      - ghost
+    volumes:
+        - "/root/ghost/mysql:/var/lib/mysql"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${GHOST_PASSWORD}
+
+  mongo-db:
+    image: mongo
+    container_name: mongo-db
+    restart: always
+    networks:
+        - web
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD}
+    volumes:
+    - /root/MemeManager/mongodb/data:/data/db
+    ports:
+    - 27017:27017
+  
+  mongo-express:
+    container_name: mongo-express
+    image: mongo-express
+    restart: always
+    networks:
+        - web
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGODB_USER}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGODB_PASSWORD}
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGODB_USER}:${MONGODB_PASSWORD}@mongo-db:27017/
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mongoexpress.rule=Host(`mongo.${DOMAIN}`)"
+      - "traefik.http.routers.mongoexpress.entrypoints=web"
+      - "traefik.http.routers.mongoexpress.middlewares=redirect@file"
+      - "traefik.http.routers.mongoexpress-secured.rule=Host(`mongo.${DOMAIN}`)"
+      - "traefik.http.routers.mongoexpress-secured.entrypoints=web-secured"
+      - "traefik.http.routers.mongoexpress-secured.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.mongoexpress-secured.loadbalancer.server.port=8081"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_USER_AUTH}"
+      - "traefik.http.routers.mongoexpress-secured.middlewares=auth"
+    
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    networks:
+      - web
+    ports:
+      - 9001:9001
+    volumes:
+     - "/root/MemeManager/S3/data:/data"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.s3.rule=Host(`s3.${DOMAIN}`)"
+      - "traefik.http.routers.s3.entrypoints=web"
+      - "traefik.http.routers.s3.middlewares=redirect@file"
+      - "traefik.http.routers.s3-secured.rule=Host(`s3.${DOMAIN}`)"
+      - "traefik.http.routers.s3-secured.entrypoints=web-secured"
+      - "traefik.http.routers.s3-secured.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.s3-secured.loadbalancer.server.port=9000"
+
+  casher:
+    image: casher
+    container_name: casher
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.casher.rule=Host(`casher.${DOMAIN}`)"
+      - "traefik.http.routers.casher.entrypoints=web"
+      - "traefik.http.routers.casher.middlewares=redirect@file"
+      - "traefik.http.routers.casher-secured.rule=Host(`casher.${DOMAIN}`)"
+      - "traefik.http.routers.casher-secured.entrypoints=web-secured"
+      - "traefik.http.routers.casher-secured.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.casher-secured.loadbalancer.server.port=3000"
+
+  vscode:
+    image: lscr.io/linuxserver/code-server:latest
+    container_name: code-server
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/London
+      - PASSWORD=${VSC_PASSWORD}
+      - SUDO_PASSWORD=${VSC_ROOT_PASSWORD}
+      - PROXY_DOMAIN=dev.${DOMAIN}
+    volumes:
+      - /root/vscode:/config
+    restart: unless-stopped
+    ports:
+      - 9999:9999
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vsc.rule=Host(`dev.${DOMAIN}`)"
+      - "traefik.http.routers.vsc.entrypoints=web"
+      - "traefik.http.routers.vsc.middlewares=redirect@file"
+      - "traefik.http.routers.vsc-secured.rule=Host(`dev.${DOMAIN}`)"
+      - "traefik.http.routers.vsc-secured.entrypoints=web-secured"
+      - "traefik.http.routers.vsc-secured.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.vsc-secured.loadbalancer.server.port=8443"
+      
+networks:
+  web:
+    external: true
+  ghost:
+    external: false
+
+volumes:
+  portainer_data:
