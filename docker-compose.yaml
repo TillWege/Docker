@@ -183,7 +183,7 @@ services:
       - "5432:5432"
 
   pgadmin:
-    container_name: pgadmin4_container
+    container_name: pgadmin
     image: dpage/pgadmin4
     restart: always
     networks:
@@ -200,6 +200,8 @@ services:
       - "traefik.http.routers.pgadmin-secure.rule=Host(`pgadmin.${DOMAIN}`)"
       - "traefik.http.routers.pgadmin-secure.tls=true"
       - "traefik.http.routers.pgadmin-secure.tls.certresolver=mytlschallenge"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_USER_AUTH}"
+      - "traefik.http.routers.pgadmin-secure.middlewares=auth"
   
   ghost:
     image: ghost:4-alpine
