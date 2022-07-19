@@ -339,6 +339,21 @@ services:
       - "traefik.http.routers.vsc-secured.entrypoints=web-secured"
       - "traefik.http.routers.vsc-secured.tls.certresolver=mytlschallenge"
       - "traefik.http.services.vsc-secured.loadbalancer.server.port=8443"
+
+  bingo:
+    image: bingo
+    container_name: bingo
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bingo.rule=Host(`bingo.${DOMAIN}`)"
+      - "traefik.http.routers.bingo.entrypoints=web"
+      - "traefik.http.routers.bingo.middlewares=redirect@file"
+      - "traefik.http.routers.bingo-secured.rule=Host(`bingo.${DOMAIN}`)"
+      - "traefik.http.routers.bingo-secured.entrypoints=web-secured"
+      - "traefik.http.routers.bingo-secured.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.bingo-secured.loadbalancer.server.port=3000"
       
 networks:
   web:
